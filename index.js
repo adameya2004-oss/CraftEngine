@@ -88,84 +88,111 @@ function saveSettings() {
 // Injects craft rules into the prompt BEFORE the AI generates.
 
 window.craftEngineInterceptor = function (chat, contextSize, abort, type) {
-    if (!settings.enabled) return;
-    if (type === 'quiet') return; // Don't intercept our own quiet prompts
+    try {
+        if (!settings.enabled) return;
+        if (type === 'quiet') return; // Don't intercept our own quiet prompts
+        if (type === 'impersonate') return; // Don't intercept impersonation
 
-    const injection = buildCraftInjection(settings);
+        const injection = buildCraftInjection(settings);
 
-    // Inject as a system-level message at the end of the chat array
-    // This puts craft rules close to the generation point for maximum impact
-    chat.push({
-        role: 'system',
-        content: injection,
-        injected: true // Flag so we can identify our injection
-    });
+        // Inject as a system-level message at the end of the chat array
+        // This puts craft rules close to the generation point for maximum impact
+        chat.push({
+            role: 'system',
+            content: injection,
+            injected: true // Flag so we can identify our injection
+        });
 
-    // Inject active voice profiles
-    if (settings.voiceProfiles && settings.voiceProfiles.length > 0) {
-        const activeProfiles = settings.voiceProfiles.filter(p => p.active);
-        if (activeProfiles.length > 0) {
-            const voiceInjection = activeProfiles.map(p =>
-                `[Voice of ${p.name}]: ${p.voiceGuide}`
-            ).join('\n');
+        // Inject active voice profiles
+        if (settings.voiceProfiles && settings.voiceProfiles.length > 0) {
+            const activeProfiles = settings.voiceProfiles.filter(p => p.active);
+            if (activeProfiles.length > 0) {
+                const voiceInjection = activeProfiles.map(p =>
+                    `[Voice of ${p.name}]: ${p.voiceGuide}`
+                ).join('\n');
 
-            chat.push({
-                role: 'system',
-                content: `[Craft Engine — Character Voice Profiles]\n${voiceInjection}`,
-                injected: true
-            });
+                chat.push({
+                    role: 'system',
+                    content: `[Craft Engine — Character Voice Profiles]\n${voiceInjection}`,
+                    injected: true
+                });
+            }
         }
+    } catch (err) {
+        console.error('[CraftEngine] Interceptor error:', err);
+        // Never block generation — fail silently
     }
 };
 
 // ─── MESSAGE_RECEIVED Handler (Post-Gen, Pre-Render) ────────────────
 
 async function onMessageReceived(messageId) {
-    if (!settings.enabled || !settings.autoAnalyze) return;
+    try {
+        if (!settings.enabled || !settings.autoAnalyze) return;
 
-    const context = getContext();
-    const message = context.chat[messageId];
-    if (!message || !message.mes || message.is_user) return;
+        const context = getContext();
+        const message = context.chat[messageId];
+        if (!message || !message.mes || message.is_user) return;
 
-    const text = message.mes;
-    if (text.length < 50) return; // Skip very short messages
+        const text = message.mes;
+        if (text.length < 50) return; // Skip very short messages
 
-    // Get user's last message for echoing detection
-    let userMessage = null;
-    for (let i = messageId - 1; i >= 0; i--) {
-        if (context.chat[i]?.is_user) { userMessage = context.chat[i].mes; break; }
+        // Get user's last message for echoing detection
+        let userMessage = null;
+        for (let i = messageId - 1; i >= 0; i--) {
+            if (context.chat[i]?.is_user) { userMessage = context.chat[i].mes; break; }
+        }
+
+        // Parse whitelist/blacklist from newline-separated strings
+        const whitelist = (settings.slopWhitelist || '').split('\n').map(s => s.trim()).filter(Boolean);
+        const blacklist = (settings.slopBlacklist || '').split('\n').map(s => s.trim()).filter(Boolean);
+
+        // Analyze (pure JS, instant, won't block)
+        const analysis = analyzeResponse(text, {
+            modelType: settings.modelType,
+            activePreset: settings.activePreset,
+            userMessage,
+            characterName: message.name || null,
+            whitelist,
+            blacklist
+        });
+
+        analysisCache.set(messageId, analysis);
+
+        // Update settings panel
+        updateAnalysisDisplay(analysis);
+
+        // Auto-rewrite: fire-and-forget to avoid blocking the rendering pipeline.
+        // SillyTavern expects MESSAGE_RECEIVED handlers to return quickly.
+        // If we await the LLM call here, streaming display can break.
+        if (settings.autoRewrite && analysis.overallScore < settings.rewriteThreshold) {
+            doAutoRewrite(messageId, text, analysis, context).catch(err => {
+                console.error('[CraftEngine] Auto-rewrite failed:', err);
+            });
+        }
+    } catch (err) {
+        console.error('[CraftEngine] onMessageReceived error:', err);
     }
+}
 
-    // Parse whitelist/blacklist from newline-separated strings
-    const whitelist = (settings.slopWhitelist || '').split('\n').map(s => s.trim()).filter(Boolean);
-    const blacklist = (settings.slopBlacklist || '').split('\n').map(s => s.trim()).filter(Boolean);
-
-    // Analyze
-    const analysis = analyzeResponse(text, {
-        modelType: settings.modelType,
-        activePreset: settings.activePreset,
-        userMessage,
-        characterName: message.name || null,
-        whitelist,
-        blacklist
-    });
-
-    analysisCache.set(messageId, analysis);
-
-    // Update settings panel
-    updateAnalysisDisplay(analysis);
-
-    // Auto-rewrite if enabled and below threshold
-    if (settings.autoRewrite && analysis.overallScore < settings.rewriteThreshold) {
-        const result = await smartRewrite(text, {
+/**
+ * Non-blocking auto-rewrite. Runs after the message has already rendered.
+ * Updates the message in place and triggers a re-render.
+ */
+async function doAutoRewrite(messageId, originalText, analysis, context) {
+    try {
+        const result = await smartRewrite(originalText, {
             ...settings,
             activeVoiceProfiles: settings.voiceProfiles?.filter(p => p.active) || []
         }, context);
 
         if (result.rewritten && !result.skipped) {
+            const message = context.chat[messageId];
+            if (!message) return;
+
             // Store original for diff view
             if (!message.extra) message.extra = {};
-            message.extra.craftOriginal = text;
+            message.extra.craftOriginal = originalText;
             message.extra.craftAnalysis = analysis;
             message.extra.craftNewAnalysis = result.newAnalysis;
             message.extra.craftDiff = result.diff;
@@ -174,14 +201,22 @@ async function onMessageReceived(messageId) {
             message.mes = result.rewritten;
             analysisCache.set(messageId, result.newAnalysis);
 
+            // Trigger re-render so the user sees the updated text
+            try {
+                context.eventSource.emit('MESSAGE_UPDATED', messageId);
+            } catch (e) { /* ignore render errors */ }
+
             console.log(`[CraftEngine] Rewrote message ${messageId}: ${analysis.overallScore} → ${result.newAnalysis.overallScore}`);
         }
+    } catch (err) {
+        console.error(`[CraftEngine] Auto-rewrite failed for message ${messageId}:`, err);
     }
 }
 
 // ─── CHARACTER_MESSAGE_RENDERED Handler (Post-Render UI) ────────────
 
 function onCharacterMessageRendered(messageId) {
+    try {
     if (!settings.enabled || !settings.showBadges) return;
 
     const context = getContext();
@@ -249,6 +284,9 @@ function onCharacterMessageRendered(messageId) {
     }
 
     messageElement.appendChild(badgeContainer);
+    } catch (err) {
+        console.error('[CraftEngine] Render handler error:', err);
+    }
 }
 
 // ─── Polish Handler ─────────────────────────────────────────────────
