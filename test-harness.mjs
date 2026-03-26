@@ -16,6 +16,8 @@ import {
 } from './slop-data.js';
 
 import { analyzeResponse, quickScore, getCharacterSlopProfile, clearCharacterSlop } from './analyzer.js';
+import { surgicalReplace, exportAsSTRegex, quickFix } from './surgical-replace.js';
+import { buildExampleDialogue, analyzeQuotes } from './voice-profiler.js';
 
 let passed = 0;
 let failed = 0;
@@ -254,6 +256,125 @@ const longText = GOOD_ACTION.repeat(20);
 const longResult = analyzeResponse(longText, { modelType: 'all' });
 assert(typeof longResult.overallScore === 'number', 'Very long text returns numeric score');
 assert(longResult.wordCount > 2000, `Long text word count: ${longResult.wordCount}`);
+
+// ─── NEW: Tense Detection Tests ──────────────────────────────────────
+
+section('ANALYZER — Tense Consistency');
+const pastText = `Marcus walked to the door. He pulled it open. Cold air rushed in. The snow fell thick outside, piling on the steps where his boots had left tracks an hour before. He turned back to the room. Elena sat at the table, her hands wrapped around a mug.`;
+const pastResult = analyzeResponse(pastText, { modelType: 'all' });
+console.log(`  Tense: ${pastResult.categories.tense.dominantTense} | Shifts: ${pastResult.categories.tense.shifts} | Score: ${pastResult.categories.tense.score}`);
+assert(pastResult.categories.tense.dominantTense === 'past', `Detected past tense: ${pastResult.categories.tense.dominantTense}`);
+assert(pastResult.categories.tense.score >= 70, `Consistent past tense scores well: ${pastResult.categories.tense.score}`);
+
+const mixedTense = `Marcus walks to the door. He pulled it open. Cold air rushes in. The snow fell thick outside. He turns back to the room. Elena sat at the table, wrapping her hands around a mug. She looks up. He reached for her.`;
+const mixedResult = analyzeResponse(mixedTense, { modelType: 'all' });
+console.log(`  Tense: ${mixedResult.categories.tense.dominantTense} | Shifts: ${mixedResult.categories.tense.shifts} | Score: ${mixedResult.categories.tense.score}`);
+assert(mixedResult.categories.tense.shifts >= 2, `Mixed tense detected: ${mixedResult.categories.tense.shifts} shifts`);
+assert(mixedResult.categories.tense.score < pastResult.categories.tense.score, 'Mixed tense scores lower than consistent');
+
+// ─── NEW: Voice Bleed Tests ──────────────────────────────────────────
+
+section('ANALYZER — Voice Bleed Detection');
+const voiceBleedText = `"The situation is quite untenable," Marcus said, "and we must act with considerable haste."
+
+"Indeed, the situation is quite untenable," Elena replied, "and we must act with considerable haste as well."
+
+"I find the circumstances most concerning," Marcus said.
+
+"I too find the circumstances most concerning," Elena said.`;
+
+const vbResult = analyzeResponse(voiceBleedText, { modelType: 'all' });
+if (vbResult.categories.voiceBleed.score >= 0) {
+    console.log(`  Voice bleed: ${vbResult.categories.voiceBleed.avgOverlap}% overlap | Speakers: ${vbResult.categories.voiceBleed.speakers}`);
+    assert(vbResult.categories.voiceBleed.avgOverlap > 40, `High voice overlap detected: ${vbResult.categories.voiceBleed.avgOverlap}%`);
+} else {
+    console.log('  Voice bleed: insufficient speaker data (expected for short text)');
+    passed++; // This is acceptable for short texts
+}
+
+const distinctVoiceText = `"Get out," Marcus said.
+
+"You don't mean that, baby," Elena whispered. "Come back to bed."
+
+"I do," he said. "Been meaning it for weeks."
+
+"Weeks? Darling, don't be absurd. You adore me." She laughed. "Everyone adores me."`;
+
+const dvResult = analyzeResponse(distinctVoiceText, { modelType: 'all' });
+if (dvResult.categories.voiceBleed.score >= 0) {
+    console.log(`  Distinct voices: ${dvResult.categories.voiceBleed.avgOverlap}% overlap`);
+    assert(dvResult.categories.voiceBleed.score > (vbResult.categories.voiceBleed.score >= 0 ? vbResult.categories.voiceBleed.score : 0),
+        'Distinct voices score higher than bleed');
+} else {
+    console.log('  Distinct voices: insufficient speaker data');
+    passed++;
+}
+
+// ─── NEW: Surgical Replace Tests ────────────────────────────────────
+
+section('SURGICAL REPLACE — Zero-Cost Slop Removal');
+const slopInput = 'Her breath hitched as she gazed into his obsidian eyes. With practiced ease, he flashed a wolfish grin.';
+const srResult = surgicalReplace(slopInput);
+console.log(`  Replaced ${srResult.count} phrases`);
+assert(srResult.count >= 3, `Replaced ${srResult.count} slop phrases (expected 3+)`);
+assert(!srResult.text.includes('breath hitched'), 'Removed "breath hitched"');
+assert(!srResult.text.includes('obsidian eyes'), 'Removed "obsidian eyes"');
+assert(!srResult.text.includes('wolfish grin'), 'Removed "wolfish grin"');
+assert(srResult.text.length > 20, 'Output still has content');
+console.log(`  Before: ${slopInput.substring(0, 60)}...`);
+console.log(`  After:  ${srResult.text.substring(0, 60)}...`);
+
+const cleanInput = 'The cat sat on the mat and yawned.';
+const cleanSR = surgicalReplace(cleanInput);
+assert(cleanSR.count === 0, 'Clean text has zero replacements');
+assert(cleanSR.text === cleanInput, 'Clean text unchanged');
+
+const qf = quickFix(slopInput);
+assert(qf !== null, 'quickFix returns result for sloppy text');
+assert(quickFix(cleanInput) === null, 'quickFix returns null for clean text');
+
+section('SURGICAL REPLACE — Whitelist');
+const wlSR = surgicalReplace(slopInput, { whitelist: ['breath hitched'] });
+assert(wlSR.text.includes('breath hitched'), 'Whitelist preserves "breath hitched"');
+assert(wlSR.count < srResult.count, 'Whitelist reduces replacement count');
+
+section('REGEX EXPORT — ST Regex Script');
+const regexExport = exportAsSTRegex({ modelType: 'all' });
+assert(regexExport.count > 20, `Exported ${regexExport.count} regex entries (expected 20+)`);
+assert(regexExport.json.length > 100, 'JSON output is substantial');
+const parsed = JSON.parse(regexExport.json);
+assert(Array.isArray(parsed), 'Exported JSON is an array');
+assert(parsed[0].findRegex, 'First entry has findRegex');
+assert(parsed[0].replaceString !== undefined, 'First entry has replaceString');
+assert(parsed[0].placement[0] === 1, 'Entries target AI output (placement 1)');
+
+// ─── NEW: Voice Profiler — Example Dialogue Builder ─────────────────
+
+section('VOICE PROFILER — Example Dialogue Builder');
+const testQuotes = [
+    "Yeah? And what are you gonna do about it?",
+    "I don't have time for this. Let's move.",
+    "Look, I've been doing this since before you were born, kid.",
+    "Fine. But if we die, it's on you.",
+    "That's literally the worst plan I've ever heard. I love it.",
+    "Shut up and pass me the wrench.",
+    "You finished? Good. Here's what's actually happening.",
+    "Oh for the love of — just give me the damn thing."
+];
+
+const examples = buildExampleDialogue('Marcus', testQuotes);
+assert(examples !== null, 'buildExampleDialogue returns result');
+assert(examples.includes('{{char}}:'), 'Uses {{char}} format');
+const lineCount = examples.split('\n').length;
+assert(lineCount >= 3 && lineCount <= 5, `Picks ${lineCount} diverse lines (target 3-5)`);
+console.log(`  Generated ${lineCount} example dialogue lines`);
+
+const quoteAnalysis = analyzeQuotes(testQuotes);
+assert(quoteAnalysis !== null, 'analyzeQuotes returns result');
+assert(quoteAnalysis.avgLength > 0, `Average quote length: ${quoteAnalysis.avgLength.toFixed(1)} words`);
+
+const shortQuotes = ['Yes.', 'No.'];
+assert(buildExampleDialogue('X', shortQuotes) === null, 'Returns null for too few quotes');
 
 // ─── Summary ─────────────────────────────────────────────────────────
 

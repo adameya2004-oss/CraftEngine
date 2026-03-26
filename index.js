@@ -18,6 +18,7 @@ import { profileCharacter, buildVoiceEntry } from './voice-profiler.js';
 import { detectConnection, describeConnection, testConnection } from './api-client.js';
 import { scanChat, highlightSlopInChat, clearSlopHighlights, batchFixChat, buildReviewReport, buildHeatmap, buildCharacterSlopReport } from './chat-reviewer.js';
 import { getCharacterSlopProfile, clearCharacterSlop } from './analyzer.js';
+import { surgicalReplace, exportAsSTRegex, quickFix } from './surgical-replace.js';
 
 // ─── Extension State ────────────────────────────────────────────────
 
@@ -1123,7 +1124,61 @@ function registerSlashCommands() {
             helpString: 'Rewrite the worst messages in chat using craft rules.'
         });
 
-        console.log('[CraftEngine] Slash commands registered: /craft, /polish, /craft-review, /craft-highlight, /craft-fix');
+        // /craft-quickfix — Zero-cost surgical slop replacement
+        context.SlashCommandParser.addCommandObject({
+            name: 'craft-quickfix',
+            callback: async (args, value) => {
+                const lastMessageIdx = context.chat.length - 1;
+                const message = context.chat[lastMessageIdx];
+                if (!message || message.is_user) return 'No AI message to fix.';
+
+                const result = quickFix(message.mes, {
+                    modelType: settings.modelType,
+                    whitelist: (settings.slopWhitelist || '').split('\n').filter(Boolean)
+                });
+
+                if (!result) return 'No slop found to replace.';
+
+                // Store original
+                if (!message.extra) message.extra = {};
+                message.extra.craftOriginal = message.mes;
+                message.mes = result.text;
+
+                try { context.eventSource.emit('MESSAGE_UPDATED', lastMessageIdx); } catch (e) {}
+                return `Quick-fixed ${result.count} slop phrases (zero LLM cost).`;
+            },
+            helpString: 'Replace slop phrases with concrete alternatives (zero LLM cost).'
+        });
+
+        // /craft-export-regex — Export slop patterns as ST regex scripts
+        context.SlashCommandParser.addCommandObject({
+            name: 'craft-export-regex',
+            callback: async (args, value) => {
+                const result = exportAsSTRegex({
+                    modelType: settings.modelType,
+                    whitelist: (settings.slopWhitelist || '').split('\n').filter(Boolean)
+                });
+
+                // Copy to clipboard
+                try {
+                    await navigator.clipboard.writeText(result.json);
+                    return `Exported ${result.count} regex scripts to clipboard. Paste into ST's Regex Scripts panel.`;
+                } catch (e) {
+                    // Fallback: download as file
+                    const blob = new Blob([result.json], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'craft-engine-antislop-regex.json';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    return `Exported ${result.count} regex scripts as file download.`;
+                }
+            },
+            helpString: 'Export slop detection patterns as SillyTavern regex scripts (zero-cost post-processing).'
+        });
+
+        console.log('[CraftEngine] Slash commands registered: /craft, /polish, /craft-review, /craft-highlight, /craft-fix, /craft-quickfix, /craft-export-regex');
     } catch (error) {
         console.warn('[CraftEngine] Could not register slash commands:', error);
     }

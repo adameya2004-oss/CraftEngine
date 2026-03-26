@@ -423,6 +423,158 @@ function analyzeEnding(text) {
     };
 }
 
+// ─── Tense Consistency Detection ────────────────────────────────────
+
+/**
+ * Detect tense shifts within a response.
+ * The #1 ProsePolisher complaint: AI flips between past and present tense.
+ */
+function analyzeTense(text) {
+    const sentences = splitSentences(text);
+    if (sentences.length < 4) return { score: 80, dominantTense: 'unknown', shifts: 0, details: 'Too few sentences for tense analysis.' };
+
+    const PAST_MARKERS = /\b(was|were|had|did|went|came|said|told|looked|turned|walked|felt|saw|heard|knew|thought|found|made|took|got|gave|kept|stood|ran|fell|held|began|seemed|appeared|asked|replied|pulled|pushed|reached|grabbed|dropped|sat|lay|threw|caught|struck|hit|bit|cut|spoke|broke|wrote|drove|led|met|set|put|let|brought|paid|won|wore|chose|drew|grew|rose|sang|shook|shut|shot|swam|swore|tore|woke|wove)\b/i;
+    const PRESENT_MARKERS = /\b(is|are|am|has|does|goes|comes|says|tells|looks|turns|walks|feels|sees|hears|knows|thinks|finds|makes|takes|gets|gives|keeps|stands|runs|falls|holds|begins|seems|appears|asks|replies|pulls|pushes|reaches|grabs|drops|sits|lies|throws|catches|strikes|hits|bites|cuts|speaks|breaks|writes|drives|leads|meets|sets|puts|lets|brings|pays|wins|wears|chooses|draws|grows|rises|sings|shakes|shuts|shoots|swims|swears|tears|wakes|weaves)\b/i;
+
+    let pastCount = 0;
+    let presentCount = 0;
+    const tensePerSentence = [];
+
+    for (const s of sentences) {
+        // Skip dialogue lines — characters can speak in any tense
+        if (isDialogue(s)) { tensePerSentence.push('dialogue'); continue; }
+
+        const hasPast = PAST_MARKERS.test(s);
+        const hasPresent = PRESENT_MARKERS.test(s);
+
+        if (hasPast && !hasPresent) { pastCount++; tensePerSentence.push('past'); }
+        else if (hasPresent && !hasPast) { presentCount++; tensePerSentence.push('present'); }
+        else if (hasPast && hasPresent) { tensePerSentence.push('mixed'); }
+        else { tensePerSentence.push('neutral'); }
+    }
+
+    const dominantTense = pastCount >= presentCount ? 'past' : 'present';
+    const minorityTense = dominantTense === 'past' ? 'present' : 'past';
+
+    // Count shifts: how many times does the non-dominant tense appear in narration?
+    let shifts = 0;
+    for (const t of tensePerSentence) {
+        if (t === minorityTense) shifts++;
+    }
+
+    // Also count mixed sentences
+    const mixedCount = tensePerSentence.filter(t => t === 'mixed').length;
+
+    const totalNarration = pastCount + presentCount + mixedCount;
+    const shiftPct = totalNarration > 0 ? (shifts + mixedCount) / totalNarration : 0;
+
+    let score = 90;
+    if (shiftPct > 0.3) score -= 30;
+    else if (shiftPct > 0.2) score -= 20;
+    else if (shiftPct > 0.1) score -= 10;
+
+    return {
+        score: Math.max(0, Math.min(100, score)),
+        dominantTense,
+        pastCount,
+        presentCount,
+        shifts,
+        mixedCount,
+        shiftPct: Math.round(shiftPct * 100) / 100,
+        details: `${dominantTense} tense dominant (${pastCount} past, ${presentCount} present) | ${shifts} tense shifts | ${mixedCount} mixed sentences`
+    };
+}
+
+// ─── Voice Bleed Detection ──────────────────────────────────────────
+
+/**
+ * Detect when multiple characters' dialogue sounds identical.
+ * Extracts dialogue attributed to different speakers and compares vocabulary.
+ */
+function analyzeVoiceBleed(text) {
+    // Extract dialogue with attribution: "text," Speaker said / Speaker said, "text"
+    const attrRegex = /(?:[""\u201C]([^""\u201D]+)[""\u201D]\s*(?:,?\s*)?(\w+)\s+(?:said|asked|replied|muttered|whispered|shouted|growled|murmured|breathed|hissed|snarled|barked|purred|exclaimed|called))|(?:(\w+)\s+(?:said|asked|replied|muttered|whispered|shouted|growled|murmured|breathed|hissed|snarled|barked|purred|exclaimed|called)\s*(?:,?\s*)?[""\u201C]([^""\u201D]+)[""\u201D])/gi;
+
+    const speakerLines = {};
+    let match;
+    while ((match = attrRegex.exec(text)) !== null) {
+        const speaker = (match[2] || match[3] || '').toLowerCase();
+        const dialogue = (match[1] || match[4] || '').toLowerCase();
+        if (!speaker || !dialogue || speaker.length < 2) continue;
+
+        if (!speakerLines[speaker]) speakerLines[speaker] = [];
+        speakerLines[speaker].push(dialogue);
+    }
+
+    const speakers = Object.keys(speakerLines);
+    if (speakers.length < 2) {
+        return { score: -1, details: 'Need 2+ identified speakers for voice bleed analysis.' };
+    }
+
+    // Build vocabulary profile per speaker
+    const speakerVocab = {};
+    for (const [speaker, lines] of Object.entries(speakerLines)) {
+        const words = lines.join(' ').replace(/[^a-z\s'-]/g, '').split(/\s+/).filter(w => w.length > 3);
+        speakerVocab[speaker] = new Set(words);
+    }
+
+    // Compare vocabulary overlap between each pair of speakers
+    let totalOverlap = 0;
+    let pairCount = 0;
+    const bleedPairs = [];
+
+    for (let i = 0; i < speakers.length; i++) {
+        for (let j = i + 1; j < speakers.length; j++) {
+            const vocabA = speakerVocab[speakers[i]];
+            const vocabB = speakerVocab[speakers[j]];
+            const smaller = Math.min(vocabA.size, vocabB.size);
+            if (smaller < 3) continue;
+
+            let overlap = 0;
+            for (const word of vocabA) {
+                if (vocabB.has(word)) overlap++;
+            }
+            const overlapPct = overlap / smaller;
+            totalOverlap += overlapPct;
+            pairCount++;
+
+            if (overlapPct > 0.6) {
+                bleedPairs.push({ speakers: [speakers[i], speakers[j]], overlapPct: Math.round(overlapPct * 100) });
+            }
+        }
+    }
+
+    const avgOverlap = pairCount > 0 ? totalOverlap / pairCount : 0;
+
+    // Also check sentence length similarity across speakers
+    const speakerAvgLen = {};
+    for (const [speaker, lines] of Object.entries(speakerLines)) {
+        const lens = lines.map(l => l.split(/\s+/).length);
+        speakerAvgLen[speaker] = lens.reduce((a, b) => a + b, 0) / lens.length;
+    }
+    const lenValues = Object.values(speakerAvgLen);
+    const lenRange = Math.max(...lenValues) - Math.min(...lenValues);
+
+    let score = 85;
+    if (avgOverlap > 0.7) score -= 30;
+    else if (avgOverlap > 0.5) score -= 15;
+    else if (avgOverlap > 0.35) score -= 5;
+
+    if (lenRange < 2) score -= 10; // All speakers have same sentence length
+    if (bleedPairs.length > 0) score -= bleedPairs.length * 5;
+
+    return {
+        score: Math.max(0, Math.min(100, score)),
+        speakers: speakers.length,
+        avgOverlap: Math.round(avgOverlap * 100),
+        bleedPairs,
+        speakerAvgLen,
+        details: speakers.length >= 2
+            ? `${speakers.length} speakers | ${Math.round(avgOverlap * 100)}% avg vocabulary overlap${bleedPairs.length ? ` | ${bleedPairs.length} bleed pairs` : ''}`
+            : 'Insufficient speaker data'
+    };
+}
+
 // ─── Structural Slop Detection ──────────────────────────────────────
 
 /**
@@ -584,16 +736,18 @@ export function analyzeResponse(text, options = {}) {
     const repetition = analyzeRepetition(text, sentences);
     const ending = analyzeEnding(text);
     const structural = analyzeStructural(text, userMessage);
+    const tense = analyzeTense(text);
+    const voiceBleed = analyzeVoiceBleed(text);
 
     // Per-character slop tracking
     const characterSlop = trackCharacterSlop(characterName, slop.matches);
 
     // Weight scores based on what matters for this scene type
     const weights = {
-        action:   { rhythm: 0.22, sensory: 0.25, slop: 0.18, dialogue: 0.05, repetition: 0.08, ending: 0.08, structural: 0.14 },
-        romance:  { rhythm: 0.18, sensory: 0.22, slop: 0.18, dialogue: 0.08, repetition: 0.08, ending: 0.12, structural: 0.14 },
-        dialogue: { rhythm: 0.08, sensory: 0.08, slop: 0.18, dialogue: 0.25, repetition: 0.12, ending: 0.12, structural: 0.17 },
-        general:  { rhythm: 0.17, sensory: 0.13, slop: 0.20, dialogue: 0.08, repetition: 0.12, ending: 0.12, structural: 0.18 }
+        action:   { rhythm: 0.20, sensory: 0.23, slop: 0.16, dialogue: 0.05, repetition: 0.07, ending: 0.07, structural: 0.12, tense: 0.10 },
+        romance:  { rhythm: 0.16, sensory: 0.20, slop: 0.16, dialogue: 0.07, repetition: 0.07, ending: 0.10, structural: 0.12, tense: 0.12 },
+        dialogue: { rhythm: 0.07, sensory: 0.07, slop: 0.16, dialogue: 0.22, repetition: 0.10, ending: 0.10, structural: 0.15, tense: 0.13 },
+        general:  { rhythm: 0.15, sensory: 0.11, slop: 0.18, dialogue: 0.07, repetition: 0.10, ending: 0.10, structural: 0.16, tense: 0.13 }
     };
 
     const w = weights[sceneType] || weights.general;
@@ -601,7 +755,9 @@ export function analyzeResponse(text, options = {}) {
     // If dialogue analysis returned -1 (insufficient), redistribute its weight
     const effectiveDialogueScore = dialogue.score >= 0 ? dialogue.score : 0;
     const dialogueWeight = dialogue.score >= 0 ? w.dialogue : 0;
-    const totalWeight = w.rhythm + w.sensory + w.slop + dialogueWeight + w.repetition + w.ending + w.structural;
+    // Voice bleed only counts if we have data
+    const effectiveVoiceBleed = voiceBleed.score >= 0 ? voiceBleed.score : 0;
+    const totalWeight = w.rhythm + w.sensory + w.slop + dialogueWeight + w.repetition + w.ending + w.structural + w.tense;
 
     const overallScore = Math.round(
         (rhythm.score * w.rhythm +
@@ -610,7 +766,8 @@ export function analyzeResponse(text, options = {}) {
          effectiveDialogueScore * dialogueWeight +
          repetition.score * w.repetition +
          ending.score * w.ending +
-         structural.score * w.structural) / totalWeight
+         structural.score * w.structural +
+         tense.score * w.tense) / totalWeight
     );
 
     // Letter grade
@@ -634,20 +791,22 @@ export function analyzeResponse(text, options = {}) {
             dialogue,
             repetition,
             ending,
-            structural
+            structural,
+            tense,
+            voiceBleed
         },
         characterSlop,
         // Quick summary for the badge
         summary: `${grade} (${overallScore}) | ${sceneType} | Rhythm: ${rhythm.score} | Sensory: ${sensory.score} | Slop: ${slop.score} | Structural: ${structural.score}`,
         // Actionable suggestions
-        suggestions: generateSuggestions(rhythm, sensory, slop, dialogue, repetition, ending, sceneType, structural)
+        suggestions: generateSuggestions(rhythm, sensory, slop, dialogue, repetition, ending, sceneType, structural, tense, voiceBleed)
     };
 }
 
 /**
  * Generate human-readable improvement suggestions.
  */
-function generateSuggestions(rhythm, sensory, slop, dialogue, repetition, ending, sceneType, structural) {
+function generateSuggestions(rhythm, sensory, slop, dialogue, repetition, ending, sceneType, structural, tense, voiceBleed) {
     const suggestions = [];
 
     // Rhythm suggestions
@@ -729,6 +888,23 @@ function generateSuggestions(rhythm, sensory, slop, dialogue, repetition, ending
                 suggestions.push('Rigid formatting: all paragraphs are similar length. Vary paragraph size for natural rhythm.');
             }
         }
+    }
+
+    // Tense suggestions
+    if (tense && tense.shifts > 2) {
+        suggestions.push(`Tense inconsistency: ${tense.shifts} shifts from ${tense.dominantTense} tense. Pick one tense and stick with it.`);
+    }
+    if (tense && tense.mixedCount > 2) {
+        suggestions.push(`${tense.mixedCount} sentences mix past and present tense. Clean up verb tenses.`);
+    }
+
+    // Voice bleed suggestions
+    if (voiceBleed && voiceBleed.score >= 0 && voiceBleed.avgOverlap > 50) {
+        suggestions.push(`Voice bleed: characters share ${voiceBleed.avgOverlap}% vocabulary. Give each character distinct word choices, sentence lengths, and verbal tics.`);
+    }
+    if (voiceBleed && voiceBleed.bleedPairs?.length > 0) {
+        const pairs = voiceBleed.bleedPairs.map(p => `${p.speakers[0]}/${p.speakers[1]} (${p.overlapPct}%)`);
+        suggestions.push(`Voice bleed between: ${pairs.join(', ')}. These characters sound too similar.`);
     }
 
     return suggestions;

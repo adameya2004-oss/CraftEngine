@@ -237,13 +237,65 @@ export async function profileCharacter(characterName, options, context, settings
         settings
     );
 
+    // Build diverse example dialogue — pick quotes that show different speech patterns
+    const exampleDialogue = buildExampleDialogue(characterName, quotes, quoteAnalysis);
+
     return {
         characterName,
         quoteAnalysis,
         voiceGuide,
-        // Build example dialogue format for character cards
-        exampleDialogue: quotes.length > 0
-            ? quotes.slice(0, 5).map(q => `{{char}}: "${q}"`).join('\n')
-            : null
+        exampleDialogue
     };
+}
+
+/**
+ * Build diverse example dialogue lines from quotes.
+ * Reddit consensus: 3-5 lines showing DIFFERENT situations beat 50 lines of the same vibe.
+ * Picks quotes that vary in: length, tone, and word choice.
+ */
+export function buildExampleDialogue(characterName, quotes, quoteAnalysis) {
+    if (!quotes || quotes.length < 3) return null;
+
+    // Score each quote for diversity
+    const scored = quotes.map((q, i) => {
+        const words = q.split(/\s+/).length;
+        const hasQuestion = /\?/.test(q);
+        const hasExclamation = /!/.test(q);
+        const hasContraction = /\w'\w/.test(q);
+        const hasSlang = /\b(yeah|nah|gonna|wanna|gotta|ain't|y'all|dunno|kinda|sorta)\b/i.test(q);
+        const isShort = words <= 6;
+        const isLong = words >= 15;
+        return { quote: q, index: i, words, hasQuestion, hasExclamation, hasContraction, hasSlang, isShort, isLong };
+    });
+
+    // Pick diverse set: one short, one long, one question, one statement, one emotional
+    const picked = [];
+    const used = new Set();
+
+    const pickOne = (filter, label) => {
+        const candidates = scored.filter((s, i) => filter(s) && !used.has(i));
+        if (candidates.length > 0) {
+            const pick = candidates[Math.floor(Math.random() * candidates.length)];
+            picked.push(pick);
+            used.add(pick.index);
+        }
+    };
+
+    pickOne(s => s.isShort, 'short');
+    pickOne(s => s.isLong, 'long');
+    pickOne(s => s.hasQuestion, 'question');
+    pickOne(s => s.hasExclamation, 'exclamation');
+    pickOne(s => s.hasSlang || s.hasContraction, 'casual');
+
+    // Fill remaining slots (up to 5) with random unselected quotes
+    while (picked.length < 5 && picked.length < quotes.length) {
+        const remaining = scored.filter(s => !used.has(s.index));
+        if (remaining.length === 0) break;
+        const pick = remaining[Math.floor(Math.random() * remaining.length)];
+        picked.push(pick);
+        used.add(pick.index);
+    }
+
+    // Format as ST example dialogue
+    return picked.map(p => `{{char}}: "${p.quote}"`).join('\n');
 }
