@@ -138,15 +138,21 @@ ${sampleQuotes || 'No quotes available.'}
 
 ${additionalContext ? `ADDITIONAL CONTEXT:\n${additionalContext}\n` : ''}
 
-Write a voice guide as a single paragraph (3-5 sentences) that would help an AI write dialogue as this character. Focus on:
-1. HOW they construct sentences (length, complexity, fragments vs. flowing)
-2. Their WORD CHOICES (crude vs. formal, specific vocabulary preferences)
-3. Their EMOTIONAL EXPRESSION (restrained, explosive, sardonic, etc.)
-4. Any VERBAL TICS or signature phrases
-5. How they ADDRESS others (titles, nicknames, formal/informal)
+Write a STRUCTURAL voice template that describes this character's speech PATTERNS, not example dialogue.
 
-The guide should be actionable — someone reading it should immediately understand this character's SOUND.
-Output ONLY the voice guide paragraph, no headers or labels:`;
+Format the template as a series of rules using structural notation:
+- Sentence pattern: {emotion + action, X-Y words} or {dismissive acknowledgment, 1-3 words}
+- Word choice: crude/formal/clinical/colloquial — list 5-8 SPECIFIC words this character would use
+- Sentence length: typical range (e.g., 3-8 words for terse, 15-25 for verbose)
+- Contractions: yes/no/sometimes
+- Address style: how they refer to others (titles, surnames, nicknames, insults)
+- Emotional tells: physical actions that reveal emotion (NOT "heart pounded" clichés — specific to THIS character)
+- Verbal tics: repeated filler words, catchphrases, dialect markers
+- What they NEVER say: patterns that would break character
+
+The template should be 4-6 sentences of structural RULES, not example lines.
+CRITICAL: Do NOT include example dialogue. Describe the PATTERN so the AI generates fresh dialogue that sounds right.
+Output ONLY the voice template, no headers or labels:`;
 
     try {
         const response = await callLLM(prompt, settings || {}, context);

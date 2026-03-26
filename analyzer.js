@@ -5,7 +5,10 @@
  */
 
 import { ALL_SENSORY, SENSORY_WORDS, detectSceneType, getBenchmarks, BENCHMARKS } from './craft-rules.js';
-import { buildSlopRegex, ECHO_STARTERS, BAD_ENDINGS, OVERUSED_TAGS, getSlopSeverity } from './slop-data.js';
+import {
+    buildSlopRegex, ECHO_STARTERS, BAD_ENDINGS, OVERUSED_TAGS, getSlopSeverity,
+    getSlopFrequencyRatio, BALL_THROWING_PATTERNS, PROTAGONIST_GRAVITY_PATTERNS
+} from './slop-data.js';
 
 // ─── Text Parsing Utilities ─────────────────────────────────────────
 
@@ -197,11 +200,11 @@ function analyzeSensory(text, sentences) {
 }
 
 /**
- * Slop Detection
- * Finds AI slop patterns. Returns matches with severity.
+ * Slop Detection — with frequency-weighted scoring, whitelist/blacklist support
+ * Finds AI slop patterns. Weights by AI-vs-human frequency ratio.
  */
-function analyzeSlop(text, modelType = 'all') {
-    const regex = buildSlopRegex(modelType);
+function analyzeSlop(text, modelType = 'all', whitelist = [], blacklist = []) {
+    const regex = buildSlopRegex(modelType, whitelist);
     const matches = [];
     let match;
 
@@ -209,8 +212,25 @@ function analyzeSlop(text, modelType = 'all') {
         matches.push({
             phrase: match[0],
             index: match.index,
-            severity: getSlopSeverity(match[0])
+            severity: getSlopSeverity(match[0]),
+            frequencyRatio: getSlopFrequencyRatio(match[0])
         });
+    }
+
+    // Check blacklist (custom user hate-phrases)
+    for (const banned of blacklist) {
+        if (!banned || banned.length < 2) continue;
+        const banRegex = new RegExp(banned.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+        let banMatch;
+        while ((banMatch = banRegex.exec(text)) !== null) {
+            matches.push({
+                phrase: banMatch[0],
+                index: banMatch.index,
+                severity: 3, // blacklisted = worst
+                frequencyRatio: 2000, // user explicitly hates this
+                blacklisted: true
+            });
+        }
     }
 
     // Deduplicate (same phrase appearing multiple times)
@@ -228,10 +248,16 @@ function analyzeSlop(text, modelType = 'all') {
     const wordCount = countWords(text);
     const slopDensity = wordCount > 0 ? totalSlop / (wordCount / 100) : 0;
 
-    // Score (inverted — lower slop is better)
+    // Frequency-weighted scoring: phrases with higher AI-vs-human ratios cost more
     let score = 100;
-    score -= totalSlop * 8;  // Each slop hit costs 8 points
-    score -= [...unique.values()].filter(m => m.severity === 3).length * 15; // Corporate language extra penalty
+    for (const m of [...unique.values()]) {
+        const ratio = m.frequencyRatio || 100;
+        // Scale: 50x = 4pts, 100x = 6pts, 500x = 10pts, 1000x+ = 14pts
+        const penalty = Math.min(14, Math.round(2 + Math.log10(ratio) * 4));
+        score -= penalty * m.count;
+    }
+    // Corporate language extra penalty
+    score -= [...unique.values()].filter(m => m.severity === 3).length * 8;
 
     return {
         score: Math.max(0, Math.min(100, score)),
@@ -397,6 +423,140 @@ function analyzeEnding(text) {
     };
 }
 
+// ─── Structural Slop Detection ──────────────────────────────────────
+
+/**
+ * Detect structural AI patterns beyond phrase-level slop:
+ * - Echoing: AI restates/paraphrases the user's input
+ * - Ball-throwing: response ends by pushing action back to user
+ * - Protagonist gravity: everything unrealistically gravitates toward user character
+ */
+function analyzeStructural(text, userMessage) {
+    let score = 100;
+    const issues = [];
+
+    // ── Ball-throwing detection ──
+    // Check if the response ends with "your call/move/choice" patterns
+    const lastParagraph = text.trim().split(/\n{2,}/).pop().trim();
+    let ballThrows = 0;
+    for (const pattern of BALL_THROWING_PATTERNS) {
+        if (pattern.test(lastParagraph)) {
+            ballThrows++;
+        }
+    }
+    if (ballThrows > 0) {
+        score -= 20 * ballThrows;
+        issues.push({ type: 'ball-throwing', count: ballThrows, detail: 'Response pushes action back to user instead of driving narrative forward' });
+    }
+
+    // ── Protagonist gravity detection ──
+    let gravityHits = 0;
+    for (const pattern of PROTAGONIST_GRAVITY_PATTERNS) {
+        const matches = text.match(pattern);
+        if (matches) gravityHits++;
+    }
+    if (gravityHits >= 3) {
+        score -= 25;
+        issues.push({ type: 'protagonist-gravity', count: gravityHits, detail: 'Everything unrealistically gravitates toward user character' });
+    } else if (gravityHits >= 2) {
+        score -= 12;
+        issues.push({ type: 'protagonist-gravity', count: gravityHits, detail: 'Multiple instances of protagonist gravity' });
+    }
+
+    // ── Echoing/parroting detection ──
+    // If we have the user's message, check if AI restates it
+    if (userMessage && userMessage.length > 20) {
+        const userWords = new Set(getWords(userMessage).filter(w => w.length > 4));
+        if (userWords.size > 3) {
+            // Check first 2 paragraphs for heavy overlap with user input
+            const openingText = text.split(/\n{2,}/).slice(0, 2).join(' ');
+            const openingWords = getWords(openingText).filter(w => w.length > 4);
+            const overlapCount = openingWords.filter(w => userWords.has(w)).length;
+            const overlapPct = openingWords.length > 0 ? overlapCount / openingWords.length : 0;
+
+            if (overlapPct > 0.5 && overlapCount > 5) {
+                score -= 25;
+                issues.push({ type: 'echoing', count: overlapCount, detail: `AI parrots ${Math.round(overlapPct * 100)}% of user input words in opening` });
+            } else if (overlapPct > 0.35 && overlapCount > 4) {
+                score -= 12;
+                issues.push({ type: 'echoing', count: overlapCount, detail: `AI echoes ${Math.round(overlapPct * 100)}% of user input words` });
+            }
+        }
+    }
+
+    // ── Repetitive formatting detection ──
+    // Check if response follows a rigid paragraph structure (all paragraphs similar length)
+    const paragraphs = text.split(/\n{2,}/).filter(p => p.trim().length > 20);
+    if (paragraphs.length >= 4) {
+        const paraLengths = paragraphs.map(p => countWords(p));
+        const avgPara = paraLengths.reduce((a, b) => a + b, 0) / paraLengths.length;
+        const paraVariance = paraLengths.reduce((sum, l) => sum + Math.pow(l - avgPara, 2), 0) / paraLengths.length;
+        const paraStdev = Math.sqrt(paraVariance);
+        const cvPara = avgPara > 0 ? paraStdev / avgPara : 0;
+
+        if (cvPara < 0.15 && paragraphs.length >= 5) {
+            score -= 15;
+            issues.push({ type: 'rigid-format', count: paragraphs.length, detail: 'All paragraphs are suspiciously similar length — robotic formatting' });
+        }
+    }
+
+    return {
+        score: Math.max(0, Math.min(100, score)),
+        issues,
+        ballThrows,
+        gravityHits,
+        details: issues.length > 0
+            ? issues.map(i => `${i.type}: ${i.detail}`).join(' | ')
+            : 'No structural issues detected'
+    };
+}
+
+// ─── Per-Character Slop Tracking ────────────────────────────────────
+
+// Module-level storage for per-character slop patterns
+const characterSlopHistory = new Map();
+
+/**
+ * Track which slop phrases appear for a specific character.
+ * Returns character-specific overuse warnings.
+ */
+function trackCharacterSlop(characterName, slopMatches) {
+    if (!characterName) return { overused: [], history: {} };
+
+    if (!characterSlopHistory.has(characterName)) {
+        characterSlopHistory.set(characterName, {});
+    }
+    const history = characterSlopHistory.get(characterName);
+
+    const overused = [];
+    for (const match of slopMatches) {
+        const key = match.phrase.toLowerCase();
+        history[key] = (history[key] || 0) + (match.count || 1);
+
+        // Flag if this character uses a phrase 3+ times across messages
+        if (history[key] >= 3) {
+            overused.push({ phrase: key, totalUses: history[key] });
+        }
+    }
+
+    return { overused, history };
+}
+
+/**
+ * Get a character's slop profile — which phrases they overuse.
+ */
+export function getCharacterSlopProfile(characterName) {
+    return characterSlopHistory.get(characterName) || {};
+}
+
+/**
+ * Clear tracking for a character (e.g., on chat reset).
+ */
+export function clearCharacterSlop(characterName) {
+    if (characterName) characterSlopHistory.delete(characterName);
+    else characterSlopHistory.clear();
+}
+
 // ─── Master Analysis Function ───────────────────────────────────────
 
 /**
@@ -407,7 +567,11 @@ export function analyzeResponse(text, options = {}) {
     const {
         modelType = 'all',
         activePreset = null,
-        customBenchmarks = null
+        customBenchmarks = null,
+        userMessage = null,
+        characterName = null,
+        whitelist = [],
+        blacklist = []
     } = options;
 
     const sentences = splitSentences(text);
@@ -415,17 +579,21 @@ export function analyzeResponse(text, options = {}) {
 
     const rhythm = analyzeRhythm(sentences);
     const sensory = analyzeSensory(text, sentences);
-    const slop = analyzeSlop(text, modelType);
+    const slop = analyzeSlop(text, modelType, whitelist, blacklist);
     const dialogue = analyzeDialogue(text);
     const repetition = analyzeRepetition(text, sentences);
     const ending = analyzeEnding(text);
+    const structural = analyzeStructural(text, userMessage);
+
+    // Per-character slop tracking
+    const characterSlop = trackCharacterSlop(characterName, slop.matches);
 
     // Weight scores based on what matters for this scene type
     const weights = {
-        action: { rhythm: 0.25, sensory: 0.30, slop: 0.20, dialogue: 0.05, repetition: 0.10, ending: 0.10 },
-        romance: { rhythm: 0.20, sensory: 0.25, slop: 0.20, dialogue: 0.10, repetition: 0.10, ending: 0.15 },
-        dialogue: { rhythm: 0.10, sensory: 0.10, slop: 0.20, dialogue: 0.30, repetition: 0.15, ending: 0.15 },
-        general: { rhythm: 0.20, sensory: 0.15, slop: 0.25, dialogue: 0.10, repetition: 0.15, ending: 0.15 }
+        action:   { rhythm: 0.22, sensory: 0.25, slop: 0.18, dialogue: 0.05, repetition: 0.08, ending: 0.08, structural: 0.14 },
+        romance:  { rhythm: 0.18, sensory: 0.22, slop: 0.18, dialogue: 0.08, repetition: 0.08, ending: 0.12, structural: 0.14 },
+        dialogue: { rhythm: 0.08, sensory: 0.08, slop: 0.18, dialogue: 0.25, repetition: 0.12, ending: 0.12, structural: 0.17 },
+        general:  { rhythm: 0.17, sensory: 0.13, slop: 0.20, dialogue: 0.08, repetition: 0.12, ending: 0.12, structural: 0.18 }
     };
 
     const w = weights[sceneType] || weights.general;
@@ -433,7 +601,7 @@ export function analyzeResponse(text, options = {}) {
     // If dialogue analysis returned -1 (insufficient), redistribute its weight
     const effectiveDialogueScore = dialogue.score >= 0 ? dialogue.score : 0;
     const dialogueWeight = dialogue.score >= 0 ? w.dialogue : 0;
-    const totalWeight = w.rhythm + w.sensory + w.slop + dialogueWeight + w.repetition + w.ending;
+    const totalWeight = w.rhythm + w.sensory + w.slop + dialogueWeight + w.repetition + w.ending + w.structural;
 
     const overallScore = Math.round(
         (rhythm.score * w.rhythm +
@@ -441,7 +609,8 @@ export function analyzeResponse(text, options = {}) {
          slop.score * w.slop +
          effectiveDialogueScore * dialogueWeight +
          repetition.score * w.repetition +
-         ending.score * w.ending) / totalWeight
+         ending.score * w.ending +
+         structural.score * w.structural) / totalWeight
     );
 
     // Letter grade
@@ -464,19 +633,21 @@ export function analyzeResponse(text, options = {}) {
             slop,
             dialogue,
             repetition,
-            ending
+            ending,
+            structural
         },
+        characterSlop,
         // Quick summary for the badge
-        summary: `${grade} (${overallScore}) | ${sceneType} | Rhythm: ${rhythm.score} | Sensory: ${sensory.score} | Slop: ${slop.score}`,
+        summary: `${grade} (${overallScore}) | ${sceneType} | Rhythm: ${rhythm.score} | Sensory: ${sensory.score} | Slop: ${slop.score} | Structural: ${structural.score}`,
         // Actionable suggestions
-        suggestions: generateSuggestions(rhythm, sensory, slop, dialogue, repetition, ending, sceneType)
+        suggestions: generateSuggestions(rhythm, sensory, slop, dialogue, repetition, ending, sceneType, structural)
     };
 }
 
 /**
  * Generate human-readable improvement suggestions.
  */
-function generateSuggestions(rhythm, sensory, slop, dialogue, repetition, ending, sceneType) {
+function generateSuggestions(rhythm, sensory, slop, dialogue, repetition, ending, sceneType, structural) {
     const suggestions = [];
 
     // Rhythm suggestions
@@ -540,6 +711,24 @@ function generateSuggestions(rhythm, sensory, slop, dialogue, repetition, ending
     // Ending suggestions
     if (ending.issues.length > 0) {
         suggestions.push('Weak ending. End on forward movement — a character actively doing something.');
+    }
+
+    // Structural suggestions
+    if (structural) {
+        for (const issue of structural.issues || []) {
+            if (issue.type === 'ball-throwing') {
+                suggestions.push('Ball-throwing detected: response pushes decision back to user. Drive the narrative forward instead.');
+            }
+            if (issue.type === 'protagonist-gravity') {
+                suggestions.push(`Protagonist gravity (${issue.count}x): everything unrealistically gravitates toward user character. Give NPCs independent motivations.`);
+            }
+            if (issue.type === 'echoing') {
+                suggestions.push('Echoing detected: AI restates user input. Start with new action or reaction, not a summary.');
+            }
+            if (issue.type === 'rigid-format') {
+                suggestions.push('Rigid formatting: all paragraphs are similar length. Vary paragraph size for natural rhythm.');
+            }
+        }
     }
 
     return suggestions;

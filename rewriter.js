@@ -16,9 +16,11 @@ function buildRewritePrompt(originalText, analysis, settings) {
     const preset = resolvePreset(settings.activePreset, settings.customPresets);
     const suggestions = analysis.suggestions;
 
-    let prompt = `You are a prose editor. Rewrite the following text to fix the specific issues listed below. `;
+    let prompt = `You are an editor polishing a passage from a novel. Rewrite the following text to fix the specific issues listed below. `;
+    prompt += `This is creative fiction writing — treat it as a published novel passage, not a chatbot response. `;
     prompt += `Preserve the original meaning, characters, plot points, and dialogue content. `;
-    prompt += `Only improve the CRAFT — sentence rhythm, sensory detail, word choice, and structure.\n\n`;
+    prompt += `Only improve the CRAFT — sentence rhythm, sensory detail, word choice, and structure. `;
+    prompt += `Use positive constraints: write WITH varied sentence openings, WITH concrete sensory detail, WITH active verbs. Do not list what to avoid.\n\n`;
 
     // Style target
     prompt += `TARGET STYLE: ${preset.craftPrompt}\n\n`;
@@ -48,6 +50,17 @@ function buildRewritePrompt(originalText, analysis, settings) {
     // Custom rules
     if (settings.customRewriteRules) {
         prompt += `\nADDITIONAL RULES: ${settings.customRewriteRules}\n`;
+    }
+
+    // Structural issues
+    if (analysis.categories.structural?.issues?.length > 0) {
+        prompt += `\nSTRUCTURAL ISSUES TO FIX:\n`;
+        for (const issue of analysis.categories.structural.issues) {
+            if (issue.type === 'ball-throwing') prompt += `- Remove "your call/move/choice" endings. Drive the narrative forward with character action.\n`;
+            if (issue.type === 'echoing') prompt += `- Don't restate what happened before. Start with NEW action or reaction.\n`;
+            if (issue.type === 'protagonist-gravity') prompt += `- NPCs should have their own motivations. Not everything centers on the protagonist.\n`;
+            if (issue.type === 'rigid-format') prompt += `- Vary paragraph lengths. Mix short punchy paragraphs with longer flowing ones.\n`;
+        }
     }
 
     prompt += `\nORIGINAL TEXT:\n${originalText}\n\n`;

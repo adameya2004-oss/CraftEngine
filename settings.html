@@ -96,6 +96,23 @@
                     <div class="craft-progress-bar"><div class="craft-progress-fill"></div></div>
                     <span class="craft-progress-text"></span>
                 </div>
+
+                <!-- Slop Heatmap -->
+                <div id="craft-heatmap-container" style="display: none;">
+                    <h4 style="margin: 8px 0 4px;">Quality Heatmap</h4>
+                    <div id="craft-heatmap" class="craft-heatmap"></div>
+                    <div class="craft-heatmap-legend">
+                        <span class="craft-heatmap-label">Worst</span>
+                        <div class="craft-heatmap-gradient"></div>
+                        <span class="craft-heatmap-label">Best</span>
+                    </div>
+                </div>
+
+                <!-- Per-Character Slop -->
+                <div id="craft-character-slop" style="display: none;">
+                    <h4 style="margin: 8px 0 4px;">Character Slop Patterns</h4>
+                    <div id="craft-character-slop-list" class="craft-scrollable"></div>
+                </div>
             </div>
 
             <!-- ═══ ANALYSIS SETTINGS ═══ -->
@@ -113,6 +130,11 @@
                 </label>
 
                 <label>
+                    <input type="checkbox" id="craft-structural-detection" checked />
+                    Detect structural slop (echoing, ball-throwing, protagonist gravity)
+                </label>
+
+                <label>
                     Model Type (for slop detection):
                     <select id="craft-model-type">
                         <option value="all">All Models</option>
@@ -123,6 +145,15 @@
                         <option value="universal">Universal Only</option>
                     </select>
                 </label>
+            </div>
+
+            <!-- ═══ SLOP WHITELIST / BLACKLIST ═══ -->
+            <div class="craft-section">
+                <h4>Slop Whitelist / Blacklist</h4>
+                <textarea id="craft-slop-whitelist" rows="2"
+                    placeholder="Whitelisted terms (one per line) — character names, lore terms that shouldn't be flagged as slop..."></textarea>
+                <textarea id="craft-slop-blacklist" rows="2"
+                    placeholder="Blacklisted phrases (one per line) — phrases you personally hate, always flag these..."></textarea>
             </div>
 
             <!-- ═══ REWRITER SETTINGS ═══ -->

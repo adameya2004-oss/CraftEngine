@@ -32,13 +32,26 @@ export function scanChat(context, settings) {
     const gradeDistribution = { A: 0, B: 0, C: 0, D: 0, F: 0 };
     const allSlopPhrases = {};
 
+    const whitelist = (settings.slopWhitelist || '').split('\n').map(s => s.trim()).filter(Boolean);
+    const blacklist = (settings.slopBlacklist || '').split('\n').map(s => s.trim()).filter(Boolean);
+
     for (let i = 0; i < chat.length; i++) {
         const msg = chat[i];
         if (msg.is_user || !msg.mes || msg.mes.length < 50) continue;
 
+        // Get previous user message for echoing detection
+        let userMessage = null;
+        for (let j = i - 1; j >= 0; j--) {
+            if (chat[j]?.is_user) { userMessage = chat[j].mes; break; }
+        }
+
         const analysis = analyzeResponse(msg.mes, {
             modelType: settings.modelType || 'all',
-            activePreset: settings.activePreset
+            activePreset: settings.activePreset,
+            userMessage,
+            characterName: msg.name || null,
+            whitelist,
+            blacklist
         });
 
         results.push({ messageId: i, analysis });
@@ -225,9 +238,10 @@ export async function batchFixChat(context, settings, scanResults, onProgress) {
         });
 
         // Build a targeted rewrite prompt
-        let prompt = `You are a prose editor. Rewrite this roleplay response to fix quality issues. `;
+        let prompt = `You are an editor polishing a passage from a novel. Rewrite this passage to fix quality issues. `;
+        prompt += `This is creative fiction — treat it as a published novel passage, not a chatbot response. `;
         prompt += `Preserve ALL original meaning, characters, plot points, and dialogue content. `;
-        prompt += `Only improve craft: sentence rhythm, sensory detail, word choice, remove clichés.\n\n`;
+        prompt += `Improve craft: write WITH varied sentence openings, WITH concrete sensory detail, WITH active verbs.\n\n`;
         prompt += `STYLE: ${preset.craftPrompt}\n\n`;
 
         if (analysis.suggestions.length > 0) {
@@ -374,6 +388,27 @@ export function buildReviewReport(scanResults) {
         </div>`;
     }
 
+    // Structural slop summary
+    const structuralIssues = { echoing: 0, 'ball-throwing': 0, 'protagonist-gravity': 0, 'rigid-format': 0 };
+    for (const r of scanResults.results) {
+        for (const issue of r.analysis.categories?.structural?.issues || []) {
+            structuralIssues[issue.type] = (structuralIssues[issue.type] || 0) + 1;
+        }
+    }
+    const structuralTotal = Object.values(structuralIssues).reduce((a, b) => a + b, 0);
+    if (structuralTotal > 0) {
+        const badges = Object.entries(structuralIssues)
+            .filter(([_, count]) => count > 0)
+            .map(([type, count]) => {
+                const cls = type === 'ball-throwing' ? 'ball-throw' : type;
+                return `<span class="craft-structural-badge ${cls}">${type}: ${count}</span>`;
+            }).join(' ');
+        html += `<div style="margin: 6px 0; padding: 6px; background: rgba(156, 39, 176, 0.1); border-radius: 4px;">
+            <div style="font-size: 11px; font-weight: 600; margin-bottom: 3px;">Structural Issues (${structuralTotal})</div>
+            <div>${badges}</div>
+        </div>`;
+    }
+
     // Messages needing fixes
     if (belowThreshold.length > 0) {
         html += `<div style="margin-top: 6px; padding: 6px; background: rgba(244, 67, 54, 0.1); border-radius: 4px; border: 1px solid rgba(244, 67, 54, 0.2);">
@@ -390,6 +425,75 @@ export function buildReviewReport(scanResults) {
     }
 
     return html;
+}
+
+/**
+ * Build a visual heatmap showing quality across the conversation.
+ * Each cell = one AI message, colored by score.
+ */
+export function buildHeatmap(scanResults) {
+    if (!scanResults?.results?.length) return '';
+
+    const cells = scanResults.results.map(r => {
+        const score = r.analysis.overallScore;
+        const color = scoreToColor(score);
+        const structural = r.analysis.categories?.structural?.issues || [];
+        const structBadges = structural.map(i => {
+            const cls = i.type === 'ball-throwing' ? 'ball-throw' : i.type;
+            return `<span class="craft-structural-badge ${cls}">${i.type}</span>`;
+        }).join('');
+
+        return `<div class="craft-heatmap-cell" style="background: ${color};" `
+            + `title="Message #${r.messageId}: ${r.analysis.grade} (${score}) | ${r.analysis.categories.slop.totalMatches} slop${structural.length ? ' | ' + structural.map(i => i.type).join(', ') : ''}" `
+            + `data-mesid="${r.messageId}">`
+            + `</div>`;
+    }).join('');
+
+    return cells;
+}
+
+/**
+ * Build per-character slop report HTML.
+ */
+export function buildCharacterSlopReport(scanResults, chat) {
+    if (!scanResults?.results?.length) return '';
+
+    // Group slop by character name
+    const charSlop = {};
+    for (const r of scanResults.results) {
+        const msg = chat[r.messageId];
+        const charName = msg?.name || 'Unknown';
+        if (!charSlop[charName]) charSlop[charName] = {};
+
+        for (const match of r.analysis.categories.slop.matches) {
+            const phrase = match.phrase.toLowerCase();
+            charSlop[charName][phrase] = (charSlop[charName][phrase] || 0) + (match.count || 1);
+        }
+    }
+
+    let html = '';
+    for (const [name, phrases] of Object.entries(charSlop)) {
+        const sorted = Object.entries(phrases).sort((a, b) => b[1] - a[1]).slice(0, 8);
+        if (sorted.length === 0) continue;
+
+        html += `<div class="craft-char-slop-card">`;
+        html += `<h5>${escapeHtml(name)}</h5>`;
+        for (const [phrase, count] of sorted) {
+            html += `<div class="slop-phrase">"${escapeHtml(phrase)}" — <span class="count">${count}x</span></div>`;
+        }
+        html += `</div>`;
+    }
+
+    return html || '<p class="craft-muted">No character-specific slop patterns yet.</p>';
+}
+
+function scoreToColor(score) {
+    if (score >= 85) return '#4caf50';
+    if (score >= 75) return '#8bc34a';
+    if (score >= 65) return '#ffeb3b';
+    if (score >= 55) return '#ff9800';
+    if (score >= 45) return '#ff5722';
+    return '#f44336';
 }
 
 function escapeHtml(text) {

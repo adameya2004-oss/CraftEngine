@@ -445,6 +445,103 @@
     content: '';
 }
 
+/* ─── Heatmap ────────────────────────────────────────────────── */
+
+.craft-heatmap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    margin: 6px 0;
+    padding: 4px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.craft-heatmap-cell {
+    width: 18px;
+    height: 18px;
+    border-radius: 2px;
+    cursor: pointer;
+    position: relative;
+    transition: transform 0.1s;
+}
+
+.craft-heatmap-cell:hover {
+    transform: scale(1.4);
+    z-index: 10;
+    outline: 1px solid #fff;
+}
+
+.craft-heatmap-cell[title] {
+    cursor: help;
+}
+
+.craft-heatmap-legend {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    color: #888;
+    margin-top: 4px;
+}
+
+.craft-heatmap-gradient {
+    flex: 1;
+    height: 8px;
+    border-radius: 4px;
+    background: linear-gradient(to right, #f44336, #ff9800, #ffeb3b, #8bc34a, #4caf50);
+}
+
+.craft-heatmap-label {
+    font-size: 9px;
+    text-transform: uppercase;
+}
+
+/* ─── Structural Slop Badges ─────────────────────────────────── */
+
+.craft-structural-badge {
+    display: inline-block;
+    font-size: 9px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    margin-left: 3px;
+    font-weight: 600;
+}
+
+.craft-structural-badge.echo { background: rgba(156, 39, 176, 0.3); color: #ce93d8; }
+.craft-structural-badge.ball-throw { background: rgba(255, 152, 0, 0.3); color: #ffb74d; }
+.craft-structural-badge.gravity { background: rgba(33, 150, 243, 0.3); color: #64b5f6; }
+.craft-structural-badge.rigid { background: rgba(121, 85, 72, 0.3); color: #bcaaa4; }
+
+/* ─── Character Slop Cards ───────────────────────────────────── */
+
+.craft-char-slop-card {
+    padding: 6px 8px;
+    margin: 4px 0;
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 4px;
+    border-left: 3px solid #ff9800;
+}
+
+.craft-char-slop-card h5 {
+    margin: 0 0 4px;
+    font-size: 12px;
+    color: #ffb74d;
+}
+
+.craft-char-slop-card .slop-phrase {
+    font-size: 10px;
+    color: #999;
+    margin: 1px 0;
+}
+
+.craft-char-slop-card .slop-phrase .count {
+    color: #ef5350;
+    font-weight: 600;
+}
+
 /* ─── Animations ─────────────────────────────────────────────── */
 
 @keyframes craft-pulse {

@@ -16,7 +16,8 @@ import { importFromWiki, listCategoryPages, searchPages, listCategories } from '
 import { extractText, extractLore, extractStyleGuide, extractVoiceProfiles } from './file-importer.js';
 import { profileCharacter, buildVoiceEntry } from './voice-profiler.js';
 import { detectConnection, describeConnection, testConnection } from './api-client.js';
-import { scanChat, highlightSlopInChat, clearSlopHighlights, batchFixChat, buildReviewReport } from './chat-reviewer.js';
+import { scanChat, highlightSlopInChat, clearSlopHighlights, batchFixChat, buildReviewReport, buildHeatmap, buildCharacterSlopReport } from './chat-reviewer.js';
+import { getCharacterSlopProfile, clearCharacterSlop } from './analyzer.js';
 
 // ─── Extension State ────────────────────────────────────────────────
 
@@ -48,7 +49,12 @@ const DEFAULT_SETTINGS = {
     maxTokens: 4096,
     temperature: 0.7,
     // Chat review
-    batchFixLimit: 10
+    batchFixLimit: 10,
+    // Structural detection
+    structuralDetection: true,
+    // Whitelist/blacklist
+    slopWhitelist: '',
+    slopBlacklist: ''
 };
 
 let settings = { ...DEFAULT_SETTINGS };
@@ -123,10 +129,24 @@ async function onMessageReceived(messageId) {
     const text = message.mes;
     if (text.length < 50) return; // Skip very short messages
 
+    // Get user's last message for echoing detection
+    let userMessage = null;
+    for (let i = messageId - 1; i >= 0; i--) {
+        if (context.chat[i]?.is_user) { userMessage = context.chat[i].mes; break; }
+    }
+
+    // Parse whitelist/blacklist from newline-separated strings
+    const whitelist = (settings.slopWhitelist || '').split('\n').map(s => s.trim()).filter(Boolean);
+    const blacklist = (settings.slopBlacklist || '').split('\n').map(s => s.trim()).filter(Boolean);
+
     // Analyze
     const analysis = analyzeResponse(text, {
         modelType: settings.modelType,
-        activePreset: settings.activePreset
+        activePreset: settings.activePreset,
+        userMessage,
+        characterName: message.name || null,
+        whitelist,
+        blacklist
     });
 
     analysisCache.set(messageId, analysis);
@@ -797,6 +817,9 @@ function bindSettings() {
     bind('craft-active-preset', 'activePreset', 'value');
     bind('craft-custom-rules', 'customRules', 'value');
     bind('craft-custom-rewrite-rules', 'customRewriteRules', 'value');
+    bind('craft-structural-detection', 'structuralDetection', 'checked');
+    bind('craft-slop-whitelist', 'slopWhitelist', 'value');
+    bind('craft-slop-blacklist', 'slopBlacklist', 'value');
 
     // Threshold display
     const thresholdSlider = document.getElementById('craft-rewrite-threshold');
@@ -919,6 +942,32 @@ function setupReviewUI() {
                 resultsContainer.innerHTML = buildReviewReport(lastScanResults);
             }
             if (fixBtn) fixBtn.disabled = !lastScanResults?.belowThreshold?.length;
+
+            // Populate heatmap
+            const heatmapContainer = document.getElementById('craft-heatmap-container');
+            const heatmapEl = document.getElementById('craft-heatmap');
+            if (heatmapContainer && heatmapEl && lastScanResults?.results?.length) {
+                heatmapEl.innerHTML = buildHeatmap(lastScanResults);
+                heatmapContainer.style.display = 'block';
+
+                // Click heatmap cell to scroll to message
+                heatmapEl.querySelectorAll('.craft-heatmap-cell').forEach(cell => {
+                    cell.addEventListener('click', () => {
+                        const mesid = cell.dataset.mesid;
+                        const msgEl = document.querySelector(`[mesid="${mesid}"]`);
+                        if (msgEl) msgEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    });
+                });
+            }
+
+            // Populate per-character slop
+            const charSlopContainer = document.getElementById('craft-character-slop');
+            const charSlopList = document.getElementById('craft-character-slop-list');
+            if (charSlopContainer && charSlopList && lastScanResults?.results?.length) {
+                charSlopList.innerHTML = buildCharacterSlopReport(lastScanResults, context.chat);
+                charSlopContainer.style.display = 'block';
+            }
+
             scanBtn.textContent = 'Scan Chat for Slop';
             scanBtn.disabled = false;
         }, 50);
