@@ -196,9 +196,27 @@ export const STYLE_PRESETS = {
     }
 };
 
+/**
+ * Resolve a preset by name — checks built-in presets first, then custom presets from settings.
+ */
+export function resolvePreset(presetName, customPresets) {
+    if (STYLE_PRESETS[presetName]) return STYLE_PRESETS[presetName];
+    if (presetName?.startsWith('custom_') && customPresets) {
+        const idx = parseInt(presetName.replace('custom_', ''), 10);
+        const custom = customPresets[idx];
+        if (custom) {
+            return {
+                craftPrompt: custom.craftPrompt || custom.description || `Write in the style of ${custom.presetName || 'custom'}.`,
+                benchmarks: custom.benchmarks || {}
+            };
+        }
+    }
+    return STYLE_PRESETS['abercrombie-action'];
+}
+
 // The master craft injection prompt — appended via generate_interceptor
 export function buildCraftInjection(settings) {
-    const preset = STYLE_PRESETS[settings.activePreset] || STYLE_PRESETS['abercrombie-action'];
+    const preset = resolvePreset(settings.activePreset, settings.customPresets);
     const slopLevel = settings.slopDetection || 'moderate';
 
     let prompt = `[Craft Engine — Writing Quality Rules]\n`;

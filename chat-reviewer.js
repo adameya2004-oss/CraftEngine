@@ -10,7 +10,7 @@
 import { analyzeResponse } from './analyzer.js';
 import { buildSlopRegex } from './slop-data.js';
 import { callLLM } from './api-client.js';
-import { STYLE_PRESETS } from './craft-rules.js';
+import { STYLE_PRESETS, resolvePreset } from './craft-rules.js';
 
 // ─── Quick Scan ─────────────────────────────────────────────────────
 
@@ -208,7 +208,7 @@ export async function batchFixChat(context, settings, scanResults, onProgress) {
         return [];
     }
 
-    const preset = STYLE_PRESETS[settings.activePreset] || STYLE_PRESETS['abercrombie-action'];
+    const preset = resolvePreset(settings.activePreset, settings.customPresets);
     const results = [];
 
     for (let i = 0; i < toFix.length; i++) {

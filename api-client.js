@@ -62,20 +62,24 @@ export function detectConnection() {
 /**
  * Get a human-readable description of the current connection.
  */
+function safeHostname(url) {
+    try { return new URL(url).hostname; } catch { return url; }
+}
+
 export function describeConnection(settings) {
     if (settings.apiMode === 'auto') {
         const detected = detectConnection();
         if (detected) {
-            return `Using ST connection: ${detected.type} / ${detected.model}${detected.endpoint ? ` via ${new URL(detected.endpoint).hostname}` : ''}`;
+            return `Using ST connection: ${detected.type} / ${detected.model}${detected.endpoint ? ` via ${safeHostname(detected.endpoint)}` : ''}`;
         }
         return 'Using SillyTavern\'s active connection';
     }
     if (settings.apiMode === 'reverse-proxy') {
-        const host = settings.proxyEndpoint ? new URL(settings.proxyEndpoint).hostname : 'not set';
+        const host = settings.proxyEndpoint ? safeHostname(settings.proxyEndpoint) : 'not set';
         return `Reverse proxy: ${host} / ${settings.proxyModel || 'claude-sonnet-4-20250514'}`;
     }
     if (settings.apiMode === 'custom') {
-        const host = settings.customEndpoint ? new URL(settings.customEndpoint).hostname : 'not set';
+        const host = settings.customEndpoint ? safeHostname(settings.customEndpoint) : 'not set';
         return `Custom API: ${host} / ${settings.customModel || 'not set'}`;
     }
     return 'No connection configured';

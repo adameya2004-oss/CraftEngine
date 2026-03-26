@@ -668,7 +668,7 @@ export function buildLorebookEntry(condensed, pageType, uid, settings = {}) {
 
     return {
         uid,
-        key: [keys.join(', ')],
+        key: keys,
         keysecondary: [],
         comment: `${condensed.name} — ${pageType}`,
         content: content.trim(),
@@ -803,7 +803,7 @@ export async function importFromWiki(wikiUrl, options, context, onProgress) {
             progress('condense', `Condensing: ${page.title} (${i + 1}/${parsedPages.length})`,
                 50 + (i / parsedPages.length) * 30);
 
-            const condensed = await condensePage(page, page.pageType, context, { depth });
+            const condensed = await condensePage(page, page.pageType, context, settings);
 
             if (condensed) {
                 condensedPages.push({ ...condensed, pageType: page.pageType, title: page.title });

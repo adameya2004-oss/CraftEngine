@@ -266,7 +266,7 @@ async function handlePolish(messageId) {
                 // For now, just update the text content
                 const textContent = messageElement.querySelector('p') || messageElement;
                 // Trigger ST's re-render
-                context.eventSource.emit('MESSAGE_UPDATED', messageId);
+                context.eventSource.emit(context.event_types?.MESSAGE_UPDATED || 'MESSAGE_UPDATED', messageId);
             }
 
             // Update badge
@@ -577,7 +577,7 @@ function setupWikiUI() {
         const progressContainer = document.getElementById('craft-wiki-progress');
         const progressFill = progressContainer?.querySelector('.craft-progress-fill');
         const progressText = progressContainer?.querySelector('.craft-progress-text');
-        progressContainer.style.display = 'block';
+        if (progressContainer) progressContainer.style.display = 'block';
         importBtn.disabled = true;
 
         try {
@@ -607,7 +607,7 @@ function setupWikiUI() {
                     quotes: char.quotes,
                     wikiPersonality: char.personality,
                     wikiSpeechPattern: char.speechPattern
-                }, context);
+                }, context, settings);
 
                 if (profile.voiceGuide) {
                     settings.voiceProfiles.push({
@@ -657,7 +657,7 @@ function setupFileUI() {
         const progressContainer = document.getElementById('craft-file-progress');
         const progressFill = progressContainer?.querySelector('.craft-progress-fill');
         const progressText = progressContainer?.querySelector('.craft-progress-text');
-        progressContainer.style.display = 'block';
+        if (progressContainer) progressContainer.style.display = 'block';
         processBtn.disabled = true;
 
         try {

@@ -132,10 +132,16 @@ export function buildSlopRegex(modelType = 'universal') {
 }
 
 // Get severity for a slop match (1-3)
+const CORPORATE_SLOP = [
+    'delve into', 'navigate', 'landscape', 'robust', 'leverage',
+    'streamline', 'cutting-edge', 'innovative', 'seamless', 'empower',
+    'paradigm', 'synergy', 'holistic', 'proactive', 'stakeholder'
+];
+
 export function getSlopSeverity(match) {
     const lower = match.toLowerCase();
     // Corporate language is severity 3 (worst)
-    if (UNIVERSAL_SLOP.slice(-10).some(s => lower.includes(s))) return 3;
+    if (CORPORATE_SLOP.some(s => lower.includes(s))) return 3;
     // Clichés are severity 2
     if (UNIVERSAL_SLOP.some(s => lower.includes(s))) return 2;
     // Model-specific is severity 1 (mildest)

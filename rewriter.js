@@ -5,7 +5,7 @@
  */
 
 import { analyzeResponse } from './analyzer.js';
-import { STYLE_PRESETS } from './craft-rules.js';
+import { STYLE_PRESETS, resolvePreset } from './craft-rules.js';
 import { callLLM } from './api-client.js';
 
 /**
@@ -13,7 +13,7 @@ import { callLLM } from './api-client.js';
  * Targeted — only asks for fixes on the specific issues found.
  */
 function buildRewritePrompt(originalText, analysis, settings) {
-    const preset = STYLE_PRESETS[settings.activePreset] || STYLE_PRESETS['abercrombie-action'];
+    const preset = resolvePreset(settings.activePreset, settings.customPresets);
     const suggestions = analysis.suggestions;
 
     let prompt = `You are a prose editor. Rewrite the following text to fix the specific issues listed below. `;
@@ -160,10 +160,6 @@ function generateDiff(original, rewritten) {
         totalChanges: changes.length,
         changes: changes.slice(0, 20) // Cap for UI
     };
-}
-
-function countWords(text) {
-    return text.split(/\s+/).filter(w => w.length > 0).length;
 }
 
 /**

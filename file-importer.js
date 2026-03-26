@@ -43,9 +43,8 @@ export async function extractText(file) {
 
     if (name.endsWith('.html') || name.endsWith('.htm')) {
         const html = await file.text();
-        const div = document.createElement('div');
-        div.innerHTML = html;
-        return div.textContent || div.innerText || '';
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        return doc.body.textContent || '';
     }
 
     if (name.endsWith('.epub')) {
@@ -78,9 +77,8 @@ async function extractEpub(file) {
                 if (path.match(/\.(xhtml|html|htm|xml)$/i) && !zipEntry.dir) {
                     const content = await zipEntry.async('text');
                     // Strip HTML tags
-                    const div = document.createElement('div');
-                    div.innerHTML = content;
-                    const text = div.textContent || div.innerText || '';
+                    const doc = new DOMParser().parseFromString(content, 'text/html');
+                    const text = doc.body.textContent || '';
                     if (text.trim().length > 100) {
                         texts.push(text.trim());
                     }
