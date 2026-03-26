@@ -474,10 +474,10 @@ function analyzeStructural(text, userMessage) {
             const overlapCount = openingWords.filter(w => userWords.has(w)).length;
             const overlapPct = openingWords.length > 0 ? overlapCount / openingWords.length : 0;
 
-            if (overlapPct > 0.5 && overlapCount > 5) {
+            if (overlapPct > 0.5 && overlapCount > 4) {
                 score -= 25;
                 issues.push({ type: 'echoing', count: overlapCount, detail: `AI parrots ${Math.round(overlapPct * 100)}% of user input words in opening` });
-            } else if (overlapPct > 0.35 && overlapCount > 4) {
+            } else if (overlapPct > 0.30 && overlapCount > 3) {
                 score -= 12;
                 issues.push({ type: 'echoing', count: overlapCount, detail: `AI echoes ${Math.round(overlapPct * 100)}% of user input words` });
             }
