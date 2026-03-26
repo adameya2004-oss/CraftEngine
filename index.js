@@ -81,48 +81,45 @@ function saveSettings() {
     const context = getContext();
     context.extensionSettings[EXTENSION_NAME] = settings;
     context.saveSettingsDebounced();
+    // Update the injected prompt whenever settings change
+    updateCraftPromptInjection();
 }
 
-// ─── Generate Interceptor (Pre-Generation) ──────────────────────────
-// Declared in manifest.json as "craftEngineInterceptor"
-// Injects craft rules into the prompt BEFORE the AI generates.
+// ─── Craft Injection via setExtensionPrompt (Pre-Generation) ────────
+// Uses SillyTavern's native extension prompt API instead of generate_interceptor.
+// This avoids mutating the chat array, which can break streaming/display.
 
-window.craftEngineInterceptor = function (chat, contextSize, abort, type) {
+function updateCraftPromptInjection() {
     try {
-        if (!settings.enabled) return;
-        if (type === 'quiet') return; // Don't intercept our own quiet prompts
-        if (type === 'impersonate') return; // Don't intercept impersonation
+        const context = getContext();
+        if (!context.setExtensionPrompt) return; // Safety check
+
+        if (!settings.enabled) {
+            context.setExtensionPrompt(EXTENSION_NAME, '', 1, 0);
+            return;
+        }
 
         const injection = buildCraftInjection(settings);
+        let fullInjection = injection;
 
-        // Inject as a system-level message at the end of the chat array
-        // This puts craft rules close to the generation point for maximum impact
-        chat.push({
-            role: 'system',
-            content: injection,
-            injected: true // Flag so we can identify our injection
-        });
-
-        // Inject active voice profiles
+        // Append voice profiles
         if (settings.voiceProfiles && settings.voiceProfiles.length > 0) {
             const activeProfiles = settings.voiceProfiles.filter(p => p.active);
             if (activeProfiles.length > 0) {
                 const voiceInjection = activeProfiles.map(p =>
                     `[Voice of ${p.name}]: ${p.voiceGuide}`
                 ).join('\n');
-
-                chat.push({
-                    role: 'system',
-                    content: `[Craft Engine — Character Voice Profiles]\n${voiceInjection}`,
-                    injected: true
-                });
+                fullInjection += `\n\n[Craft Engine — Character Voice Profiles]\n${voiceInjection}`;
             }
         }
+
+        // Inject at position 1 (in-chat), depth 0 (closest to generation),
+        // with scan enabled and system role
+        context.setExtensionPrompt(EXTENSION_NAME, fullInjection, 1, 0, true, 'system');
     } catch (err) {
-        console.error('[CraftEngine] Interceptor error:', err);
-        // Never block generation — fail silently
+        console.error('[CraftEngine] Prompt injection error:', err);
     }
-};
+}
 
 // ─── MESSAGE_RECEIVED Handler (Post-Gen, Pre-Render) ────────────────
 
@@ -1249,11 +1246,18 @@ function registerSlashCommands() {
         setupFileUI();
         updateVoiceProfileDisplay();
 
+        // Inject craft rules via ST's native prompt API (no chat array mutation)
+        updateCraftPromptInjection();
+
         // Register event listeners
         const events = context.event_types;
         if (events) {
             context.eventSource.on(events.MESSAGE_RECEIVED, onMessageReceived);
             context.eventSource.on(events.CHARACTER_MESSAGE_RENDERED, onCharacterMessageRendered);
+            // Re-inject on settings changes that ST tracks
+            if (events.SETTINGS_UPDATED) {
+                context.eventSource.on(events.SETTINGS_UPDATED, updateCraftPromptInjection);
+            }
         }
 
         // Register slash commands

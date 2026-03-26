@@ -8,6 +8,5 @@
     "author": "ENI + LO",
     "version": "1.0.0",
     "homePage": "",
-    "auto_update": false,
-    "generate_interceptor": "craftEngineInterceptor"
+    "auto_update": false
 }
