@@ -1,0 +1,271 @@
+<div id="craft-engine-settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>Craft Engine</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+
+            <!-- Status Banner -->
+            <div id="craft-engine-status" class="craft-status">
+                <span class="craft-status-dot"></span>
+                <span class="craft-status-text">Craft Engine Active</span>
+            </div>
+
+            <!-- ═══ API CONNECTION ═══ -->
+            <div class="craft-section">
+                <h4>API Connection</h4>
+
+                <div id="craft-api-detected" class="craft-muted" style="margin-bottom: 6px;">
+                    Detecting connection...
+                </div>
+
+                <label>
+                    Connection mode:
+                    <select id="craft-api-mode">
+                        <option value="auto">Auto (use SillyTavern's connection)</option>
+                        <option value="reverse-proxy">Claude Reverse Proxy</option>
+                        <option value="custom">Custom API Endpoint</option>
+                    </select>
+                </label>
+
+                <div id="craft-proxy-settings" style="display: none;">
+                    <input type="text" id="craft-proxy-endpoint"
+                        placeholder="Proxy URL (e.g., https://your-proxy.com/v1)" />
+                    <input type="password" id="craft-proxy-apikey"
+                        placeholder="API Key (if required)" />
+                    <label>
+                        Model:
+                        <select id="craft-proxy-model">
+                            <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                            <option value="claude-opus-4-20250514">Claude Opus 4</option>
+                            <option value="claude-haiku-4-20250506">Claude Haiku 4</option>
+                            <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                            <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+                        </select>
+                    </label>
+                    <label>
+                        Format:
+                        <select id="craft-proxy-format">
+                            <option value="auto">Auto-detect</option>
+                            <option value="openai">OpenAI Compatible</option>
+                            <option value="anthropic">Anthropic Messages API</option>
+                        </select>
+                    </label>
+                    <textarea id="craft-proxy-headers" rows="2"
+                        placeholder='Custom headers JSON (optional): {"X-Custom": "value"}'></textarea>
+                </div>
+
+                <div id="craft-custom-api-settings" style="display: none;">
+                    <input type="text" id="craft-custom-endpoint"
+                        placeholder="API URL (e.g., https://openrouter.ai/api)" />
+                    <input type="password" id="craft-custom-apikey"
+                        placeholder="API Key" />
+                    <input type="text" id="craft-custom-model"
+                        placeholder="Model name (e.g., anthropic/claude-3.5-sonnet)" />
+                </div>
+
+                <button id="craft-api-test" class="menu_button" style="margin-top: 4px;">Test Connection</button>
+                <div id="craft-api-test-result" class="craft-muted"></div>
+            </div>
+
+            <!-- ═══ CHAT REVIEW ═══ -->
+            <div class="craft-section">
+                <h4>Chat Review</h4>
+
+                <div class="craft-input-row">
+                    <button id="craft-review-scan" class="menu_button" style="flex: 1;">Scan Chat for Slop</button>
+                    <button id="craft-review-highlight" class="menu_button" style="flex: 1;">Highlight Slop</button>
+                </div>
+
+                <div class="craft-input-row">
+                    <button id="craft-review-fix" class="menu_button" style="flex: 1;" disabled>Fix Worst Messages</button>
+                    <button id="craft-review-clear" class="menu_button" style="flex: 0.6;">Clear Highlights</button>
+                </div>
+
+                <label>
+                    Max messages to fix per batch:
+                    <input type="number" id="craft-batch-limit" value="10" min="1" max="50" style="width: 60px;" />
+                </label>
+
+                <div id="craft-review-results">
+                    <p class="craft-muted">Hit "Scan Chat" to analyze all messages.</p>
+                </div>
+
+                <div id="craft-review-progress" style="display: none;">
+                    <div class="craft-progress-bar"><div class="craft-progress-fill"></div></div>
+                    <span class="craft-progress-text"></span>
+                </div>
+            </div>
+
+            <!-- ═══ ANALYSIS SETTINGS ═══ -->
+            <div class="craft-section">
+                <h4>Analysis</h4>
+
+                <label>
+                    <input type="checkbox" id="craft-auto-analyze" checked />
+                    Auto-analyze every AI response
+                </label>
+
+                <label>
+                    <input type="checkbox" id="craft-show-badges" checked />
+                    Show quality badges on messages
+                </label>
+
+                <label>
+                    Model Type (for slop detection):
+                    <select id="craft-model-type">
+                        <option value="all">All Models</option>
+                        <option value="claude">Claude</option>
+                        <option value="gpt">GPT</option>
+                        <option value="deepseek">DeepSeek</option>
+                        <option value="gemini">Gemini</option>
+                        <option value="universal">Universal Only</option>
+                    </select>
+                </label>
+            </div>
+
+            <!-- ═══ REWRITER SETTINGS ═══ -->
+            <div class="craft-section">
+                <h4>Smart Rewriter</h4>
+
+                <label>
+                    <input type="checkbox" id="craft-auto-rewrite" />
+                    Auto-rewrite below threshold
+                </label>
+
+                <label>
+                    Quality threshold (0-100):
+                    <input type="range" id="craft-rewrite-threshold" min="0" max="100" value="55" />
+                    <span id="craft-threshold-display">55</span>
+                </label>
+
+                <label>
+                    <input type="checkbox" id="craft-show-diff" checked />
+                    Show diff when rewriting
+                </label>
+            </div>
+
+            <!-- ═══ STYLE PRESETS ═══ -->
+            <div class="craft-section">
+                <h4>Style Preset</h4>
+
+                <select id="craft-active-preset">
+                    <option value="abercrombie-action">Abercrombie Action — Cinematic, punchy, high sensory</option>
+                    <option value="brown-staccato">Pierce Brown Staccato — First-person, relentless momentum</option>
+                    <option value="miller-literary">Madeline Miller Literary — Flowing, immersive, poetic</option>
+                    <option value="klune-heartbeat">TJ Klune Heartbeat — Fragments, repetition, raw emotion</option>
+                    <option value="butcher-noir">Jim Butcher Noir — Urban snark, hardboiled voice</option>
+                    <option value="winn-devastation">Alice Winn Devastation — Restrained, then shattering</option>
+                    <option value="pacat-power">CS Pacat Power — Intimacy as strategy</option>
+                    <option value="gemmell-combat">David Gemmell Combat — Maximum battle sensory density</option>
+                    <option value="canon-faithful">Canon Faithful — Match source material voice</option>
+                </select>
+
+                <div id="craft-custom-presets">
+                    <!-- Dynamically populated with imported style guides -->
+                </div>
+            </div>
+
+            <!-- ═══ CUSTOM RULES ═══ -->
+            <div class="craft-section">
+                <h4>Custom Rules</h4>
+                <textarea id="craft-custom-rules" rows="4"
+                    placeholder="Add custom writing rules that get injected into every prompt..."></textarea>
+                <textarea id="craft-custom-rewrite-rules" rows="3"
+                    placeholder="Additional rules for the rewriter only..."></textarea>
+            </div>
+
+            <!-- ═══ WIKI IMPORTER ═══ -->
+            <div class="craft-section">
+                <h4>Wiki Importer</h4>
+
+                <div class="craft-input-row">
+                    <input type="text" id="craft-wiki-url" placeholder="https://naruto.fandom.com" />
+                    <button id="craft-wiki-connect" class="menu_button">Connect</button>
+                </div>
+
+                <div id="craft-wiki-panel" style="display: none;">
+                    <div class="craft-input-row">
+                        <select id="craft-wiki-mode">
+                            <option value="category">Browse Category</option>
+                            <option value="search">Search Pages</option>
+                        </select>
+                        <input type="text" id="craft-wiki-query" placeholder="Category:Characters or search term" />
+                        <button id="craft-wiki-find" class="menu_button">Find</button>
+                    </div>
+
+                    <div id="craft-wiki-results" class="craft-scrollable">
+                        <!-- Populated dynamically -->
+                    </div>
+
+                    <div class="craft-input-row">
+                        <label>
+                            <input type="checkbox" id="craft-wiki-quotes" checked />
+                            Extract character quotes
+                        </label>
+                        <label>
+                            Lorebook depth:
+                            <input type="number" id="craft-wiki-depth" value="4" min="0" max="10" style="width: 50px;" />
+                        </label>
+                    </div>
+
+                    <button id="craft-wiki-import" class="menu_button" disabled>Import Selected → Lorebook</button>
+
+                    <div id="craft-wiki-progress" style="display: none;">
+                        <div class="craft-progress-bar"><div class="craft-progress-fill"></div></div>
+                        <span class="craft-progress-text"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ FILE IMPORTER ═══ -->
+            <div class="craft-section">
+                <h4>Book/File Importer</h4>
+
+                <div class="craft-input-row">
+                    <input type="file" id="craft-file-input" accept=".txt,.md,.epub,.html,.json"
+                        multiple />
+                </div>
+
+                <select id="craft-file-mode">
+                    <option value="lore">Extract Lore → Lorebook entries</option>
+                    <option value="style">Learn Style → Create preset</option>
+                    <option value="voice">Extract Voices → Voice profiles</option>
+                </select>
+
+                <div id="craft-file-options" style="display: none;">
+                    <input type="text" id="craft-file-fandom" placeholder="Universe/Fandom name" />
+                    <input type="text" id="craft-file-author" placeholder="Author name (for style extraction)" />
+                    <input type="text" id="craft-file-work" placeholder="Work title" />
+                    <input type="text" id="craft-file-characters"
+                        placeholder="Character names (comma-separated, for voice extraction)" />
+                </div>
+
+                <button id="craft-file-process" class="menu_button" disabled>Process Files</button>
+
+                <div id="craft-file-progress" style="display: none;">
+                    <div class="craft-progress-bar"><div class="craft-progress-fill"></div></div>
+                    <span class="craft-progress-text"></span>
+                </div>
+            </div>
+
+            <!-- ═══ VOICE PROFILES ═══ -->
+            <div class="craft-section">
+                <h4>Active Voice Profiles</h4>
+                <div id="craft-voice-profiles" class="craft-scrollable">
+                    <p class="craft-muted">No voice profiles loaded. Import from wiki or file.</p>
+                </div>
+            </div>
+
+            <!-- ═══ LAST ANALYSIS ═══ -->
+            <div class="craft-section">
+                <h4>Last Analysis</h4>
+                <div id="craft-last-analysis">
+                    <p class="craft-muted">No analysis yet. Send a message to see scores.</p>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
